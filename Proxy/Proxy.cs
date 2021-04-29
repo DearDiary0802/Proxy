@@ -57,14 +57,24 @@ namespace Proxy
         }
         public void ResponseFromProxy(NetworkStream networkStream, string message)
         {
+            Socket server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             try
             {
                 message = GetRelativePath(message);
                 string[] stringInMessage = message.Split('\r', '\n');
                 string host = stringInMessage.FirstOrDefault((str) => str.Contains("Host: "));
                 host = host.Remove(host.IndexOf("Host: "), ("Host: ").Length);
+
+                if (blacklist != null && Array.IndexOf(blacklist, host.ToLower()) != -1)
+                {
+                    string error = $"HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\nContent-Length: 40\r\n\r\nAccess denied. This syte is in blacklist";
+                    byte[] errorpage = Encoding.UTF8.GetBytes(error);
+                    networkStream.Write(errorpage, 0, errorpage.Length);
+                    Console.WriteLine(DateTime.Now + ": " + host + " 403 (blocked)");
+                    return;
+                }
+
                 string[] DomainAndPort = host.Split(':');
-                Socket server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 IPAddress hostIP = Dns.GetHostEntry(DomainAndPort[0]).AddressList[0];
                 IPEndPoint serverEP;
                 if (DomainAndPort.Length == 2)
@@ -76,17 +86,7 @@ namespace Proxy
                     serverEP = new IPEndPoint(hostIP, 80);
                 }
                 server.Connect(serverEP);
-                NetworkStream serverStream = new NetworkStream(server);
-
-                if (blacklist != null && Array.IndexOf(blacklist, host.ToLower()) != -1)
-                {
-                    string error = $"HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\nContent-Length: 40\r\n\r\nAccess denied. This syte is in blacklist";
-                    byte[] errorpage = Encoding.UTF8.GetBytes(error);
-                    networkStream.Write(errorpage, 0, errorpage.Length);
-                    Console.WriteLine(DateTime.Now + ": " + host + " 403 (blocked)");
-                    return;
-                }
-                
+                NetworkStream serverStream = new NetworkStream(server);                
                 byte[] messageBytes = Encoding.UTF8.GetBytes(message);
                 serverStream.Write(messageBytes, 0, messageBytes.Length);
                 byte[] receiveData = Receive(serverStream);
@@ -99,6 +99,10 @@ namespace Proxy
             catch
             {
                 return;
+            }
+            finally
+            {
+                server.Dispose();
             }
         }
         public string GetRelativePath(string message)
